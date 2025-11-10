@@ -13,13 +13,18 @@ class SimpleNNPolicy:
         output = np.dot(h, self.w2) + self.b2
         return int(output > 0)
 
-    def mutate(self):
+    def mutate(self, mutation_scale=0.1):
         new_policy = SimpleNNPolicy(self.w1.shape[0], self.w1.shape[1])
-        new_policy.w1 = self.w1 + 0.1 * np.random.randn(*self.w1.shape)
-        new_policy.b1 = self.b1 + 0.1 * np.random.randn(*self.b1.shape)
-        new_policy.w2 = self.w2 + 0.1 * np.random.randn(*self.w2.shape)
-        new_policy.b2 = self.b2 + 0.1 * np.random.randn(*self.b2.shape)
+
+        def mutate_param(param):
+            return param * np.random.uniform(1 - mutation_scale, 1 + mutation_scale, size=param.shape)
+
+        new_policy.w1 = mutate_param(self.w1)
+        new_policy.b1 = mutate_param(self.b1)
+        new_policy.w2 = mutate_param(self.w2)
+        new_policy.b2 = mutate_param(self.b2)
         return new_policy
+
 
 def evaluate_agent(env, agent, max_steps):
     total_reward = 0
@@ -53,4 +58,4 @@ def evolutionary_strategies(env, population_size, generations, max_steps):
 
 
 env = gym.make("CartPole-v1")
-print(evolutionary_strategies(env, population_size=30, generations=20, max_steps=250))
+print(evolutionary_strategies(env, population_size=20, generations=40, max_steps=500))
