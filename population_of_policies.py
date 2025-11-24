@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+import time
 
 
 def discretize_obs(obs, bins, low, high):
@@ -33,7 +34,7 @@ class TabularPolicy:
         return child
 
 
-def evaluate_policy(env, policy, bins, low, high, max_steps=500):
+def evaluate_policy(env, policy, bins, low, high, max_steps=500, render=False):
     total_reward = 0
     obs, _ = env.reset()
     terminated, truncated = False, False
@@ -44,10 +45,13 @@ def evaluate_policy(env, policy, bins, low, high, max_steps=500):
         obs, reward, terminated, truncated, _ = env.step(action)
         total_reward += reward
         steps += 1
+        if render:
+            env.render()
+            time.sleep(0.02)  # Slow down for visibility
     return total_reward
 
 
-def evolutionary_policies(env, population_size=20, generations=20):
+def evolutionary_policies(env, population_size=20, generations=20, visualize=False, render_every=5):
     bins = (6, 12, 6, 12)
     low = np.array([-4.8, -4, -0.418, -4])
     high = np.array([4.8, 4, 0.418, 4])
@@ -56,8 +60,17 @@ def evolutionary_policies(env, population_size=20, generations=20):
     population = [TabularPolicy(state_shape) for _ in range(population_size)]
     avg_per_gen = []
 
+    # Create rendering environment only if visualization is enabled
+    render_env = None
+    if visualize:
+        render_env = gym.make("CartPole-v1", render_mode="human")
+
     for gen in range(generations):
         rewards = [evaluate_policy(env, ind, bins, low, high) for ind in population]
+
+        # Find best policy
+        best_idx = np.argmax(rewards)
+        best_policy = population[best_idx]
 
         elite_idx = np.argsort(rewards)[-population_size // 5:]
         elites = [population[i] for i in elite_idx]
@@ -75,10 +88,20 @@ def evolutionary_policies(env, population_size=20, generations=20):
         population = new_population
         avg_reward = np.mean(rewards)
         avg_per_gen.append(avg_reward)
-        print(f"Gen {gen}, Best: {max(rewards):.2f}, Avg: {avg_reward:.2f}")
+        print(f"Gen {gen}, Best: {max(rewards):.2f}, Avg: {avg_reward:.2f}, Median: {np.median(rewards):.2f}")
+
+        # Render best policy every N generations (only if visualization is enabled)
+        if visualize and render_env is not None:
+            if gen % render_every == 0 or gen == generations - 1:
+                print(f"  --> Visualizing best policy from generation {gen}...")
+                evaluate_policy(render_env, best_policy, bins, low, high, render=True)
+                time.sleep(0.5)  # Pause between generations
+
+    if visualize and render_env is not None:
+        render_env.close()
 
     return avg_per_gen
 
-
 env = gym.make("CartPole-v1")
-evolutionary_policies(env, population_size=20, generations=20)
+evolutionary_policies(env, population_size=20, generations=20, visualize=False, render_every=5)
+env.close()

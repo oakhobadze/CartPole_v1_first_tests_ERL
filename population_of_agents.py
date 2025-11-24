@@ -1,5 +1,7 @@
 import gymnasium as gym
 import numpy as np
+import time
+
 
 class SimpleNNPolicy:
     def __init__(self, input_size, hidden_size=8):
@@ -26,7 +28,7 @@ class SimpleNNPolicy:
         return new_policy
 
 
-def evaluate_agent(env, agent, max_steps):
+def evaluate_agent(env, agent, max_steps, render=False):
     total_reward = 0
     obs, _ = env.reset()
     terminated, truncated = False, False
@@ -36,15 +38,31 @@ def evaluate_agent(env, agent, max_steps):
         obs, reward, terminated, truncated, _ = env.step(action)
         total_reward += reward
         steps += 1
+        if render:
+            env.render()
+            time.sleep(0.02)  # Slow down for visibility
     return total_reward
 
-def evolutionary_strategies(env, population_size, generations, max_steps):
+
+def evolutionary_strategies(env, population_size, generations, max_steps, visualize=False, render_every=5):
     n_inputs = env.observation_space.shape[0]
     population = [SimpleNNPolicy(n_inputs) for _ in range(population_size)]
     avg_per_gen = []
+
+    # Create rendering environment only if visualization is enabled
+    render_env = None
+    if visualize:
+        render_env = gym.make("CartPole-v1", render_mode="human")
+
     for gen in range(generations):
         rewards = [evaluate_agent(env, ind, max_steps=max_steps) for ind in population]
-        elite_idx = np.argsort(rewards)[-population_size//5:]
+
+        # Find best agent
+        best_idx = np.argmax(rewards)
+        best_agent = population[best_idx]
+
+        # Evolution step
+        elite_idx = np.argsort(rewards)[-population_size // 5:]
         elites = [population[i] for i in elite_idx]
         new_population = elites.copy()
         while len(new_population) < population_size:
@@ -53,9 +71,22 @@ def evolutionary_strategies(env, population_size, generations, max_steps):
             new_population.append(child)
         avg_per_gen.append(np.mean(rewards))
         population = new_population
-        print(f"Generation {gen}, Best: {max(rewards)}, Avg: {np.mean(rewards):.2f}, Median: {np.median(rewards):.2f}")
+
+        print(
+            f"Generation {gen}, Best: {max(rewards):.2f}, Avg: {np.mean(rewards):.2f}, Median: {np.median(rewards):.2f}")
+        if visualize and render_env is not None:
+            if gen % render_every == 0 or gen == generations - 1:
+                print(f"  --> Visualizing best agent from generation {gen}...")
+                evaluate_agent(render_env, best_agent, max_steps=max_steps, render=True)
+                time.sleep(0.5)  # Pause between generations
+
+    if visualize and render_env is not None:
+        render_env.close()
     return avg_per_gen
 
 
+
 env = gym.make("CartPole-v1")
-print(evolutionary_strategies(env, population_size=20, generations=40, max_steps=500))
+print(evolutionary_strategies(env, population_size=20, generations=40, max_steps=500, visualize=False, render_every=5))
+
+env.close()
