@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+import time
 
 
 class ActionSequence:
@@ -47,7 +48,7 @@ class ActionSequence:
         return child
 
 
-def evaluate_sequence(env, action_seq, penalty_factor=0.001):
+def evaluate_sequence(env, action_seq, penalty_factor=0.001, render=False):
     total_reward = 0
     obs, _ = env.reset()
     terminated, truncated = False, False
@@ -58,17 +59,30 @@ def evaluate_sequence(env, action_seq, penalty_factor=0.001):
         obs, reward, terminated, truncated, _ = env.step(action)
         total_reward += reward
         idx += 1
+        if render:
+            env.render()
+            time.sleep(0.02)  # Slow down for visibility
 
     fitness = total_reward - penalty_factor * len(action_seq.sequence)
     return fitness
 
 
-def evolutionary_actions(env, population_size, generations, max_seq_length):
+def evolutionary_actions(env, population_size, generations, max_seq_length, visualize=False, render_every=5):
     population = [ActionSequence(max_length=max_seq_length) for _ in range(population_size)]
     avg_per_gen = []
 
+    # Create rendering environment only if visualization is enabled
+    render_env = None
+    if visualize:
+        render_env = gym.make("CartPole-v1", render_mode="human")
+
     for gen in range(generations):
         rewards = [evaluate_sequence(env, ind) for ind in population]
+
+        # Find best agent
+        best_idx = np.argmax(rewards)
+        best_sequence = population[best_idx]
+
         elite_idx = np.argsort(rewards)[-population_size // 5:]
         elites = [population[i] for i in elite_idx]
 
@@ -87,11 +101,23 @@ def evolutionary_actions(env, population_size, generations, max_seq_length):
         avg_per_gen.append(np.mean(rewards))
         print(
             f"Gen {gen}, Best: {max(rewards):.2f}, "
-            f"Avg: {np.mean(rewards):.2f}, Median: {np.median(rewards):.2f}"
+            f"Avg: {np.mean(rewards):.2f}, Median: {np.median(rewards):.2f}, "
+            f"Best Seq Length: {len(best_sequence.sequence)}"
         )
+
+        # Render best sequence every N generations (only if visualization is enabled)
+        if visualize and render_env is not None:
+            if gen % render_every == 0 or gen == generations - 1:
+                print(f"  --> Visualizing best sequence from generation {gen}...")
+                evaluate_sequence(render_env, best_sequence, render=True)
+                time.sleep(0.5)  # Pause between generations
+
+    if visualize and render_env is not None:
+        render_env.close()
 
     return avg_per_gen
 
 
 env = gym.make("CartPole-v1")
-evolutionary_actions(env, population_size=20, generations=20, max_seq_length=500)
+evolutionary_actions(env, population_size=20, generations=20, max_seq_length=500, visualize=False, render_every=5)
+env.close()
