@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+import time
 
 
 class SimpleNNPolicy:
@@ -9,11 +10,9 @@ class SimpleNNPolicy:
         self.w2 = np.random.randn(hidden_size)
         self.b2 = np.random.randn(1)
 
-    def act(self, obs, return_logits=False):
+    def act(self, obs):
         h = np.tanh(np.dot(obs, self.w1) + self.b1)
         output = np.dot(h, self.w2) + self.b2
-        if return_logits:
-            return output
         return int(output > 0)
 
     def mutate(self, mutation_scale=0.1):
@@ -28,17 +27,8 @@ class SimpleNNPolicy:
         new_policy.b2 = mutate_param(self.b2)
         return new_policy
 
-    def copy(self):
-        """Create a copy of the policy"""
-        new_policy = SimpleNNPolicy(self.w1.shape[0], self.w1.shape[1])
-        new_policy.w1 = self.w1.copy()
-        new_policy.b1 = self.b1.copy()
-        new_policy.w2 = self.w2.copy()
-        new_policy.b2 = self.b2.copy()
-        return new_policy
 
-
-def evaluate_agent(env, agent, max_steps):
+def evaluate_agent(env, agent, max_steps, render=False):
     total_reward = 0
     obs, _ = env.reset()
     terminated, truncated = False, False
@@ -48,102 +38,86 @@ def evaluate_agent(env, agent, max_steps):
         obs, reward, terminated, truncated, _ = env.step(action)
         total_reward += reward
         steps += 1
+        if render:
+            env.render()
+            time.sleep(0.02)
     return total_reward
 
 
-def reinforce_episode(env, agent, max_steps, learning_rate=0.001):
-    """
-    Run one episode and collect trajectory for REINFORCE update
-    Returns: total_reward, updated_agent
-    """
-    observations = []
-    actions = []
-    rewards = []
+def train_agent_with_rl(env, agent, episodes=3, learning_rate=0.01, max_steps=500):
+    """Train a single agent using simple policy gradient (RL)"""
+    for _ in range(episodes):
+        obs, _ = env.reset()
+        states, actions, rewards = [], [], []
+        terminated, truncated = False, False
+        steps = 0
 
-    obs, _ = env.reset()
-    terminated, truncated = False, False
-    steps = 0
+        # Collect episode
+        while not (terminated or truncated) and steps < max_steps:
+            states.append(obs)
+            action = agent.act(obs)
+            actions.append(action)
+            obs, reward, terminated, truncated, _ = env.step(action)
+            rewards.append(reward)
+            steps += 1
 
-    while not (terminated or truncated) and steps < max_steps:
-        logit = agent.act(obs, return_logits=True)
-        prob_action_1 = 1 / (1 + np.exp(-logit))
-        action = 1 if np.random.random() < prob_action_1 else 0
+        if len(rewards) == 0:
+            continue
 
-        observations.append(obs)
-        actions.append(action)
+        # Calculate returns
+        returns = []
+        G = 0
+        for r in reversed(rewards):
+            G = r + 0.99 * G
+            returns.insert(0, G)
 
-        obs, reward, terminated, truncated, _ = env.step(action)
-        rewards.append(reward)
-        steps += 1
+        returns = np.array(returns)
+        returns = (returns - np.mean(returns)) / (np.std(returns) + 1e-8)
 
-    # Calculate returns (simple monte carlo)
-    returns = []
-    G = 0
-    for r in reversed(rewards):
-        G = r + 0.99 * G
-        returns.insert(0, G)
-    returns = np.array(returns)
+        # Update weights using policy gradient
+        for state, action, G in zip(states, actions, returns):
+            # Forward pass
+            h = np.tanh(np.dot(state, agent.w1) + agent.b1)
+            output = np.dot(h, agent.w2) + agent.b2
 
-    # Normalize returns
-    if len(returns) > 1:
-        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+            # Gradient calculation
+            target = 1 if action == 1 else -1
+            delta_output = (target - output) * G * learning_rate
 
-    # REINFORCE update
-    updated_agent = agent.copy()
-    for obs, action, G in zip(observations, actions, returns):
-        # Forward pass
-        h = np.tanh(np.dot(obs, updated_agent.w1) + updated_agent.b1)
-        logit = np.dot(h, updated_agent.w2) + updated_agent.b2
-        prob_action_1 = 1 / (1 + np.exp(-logit))
+            # Backpropagation
+            agent.w2 += h * delta_output
+            agent.b2 += delta_output
 
-        # Calculate gradient of log probability
-        if action == 1:
-            grad_logit = (1 - prob_action_1)
-        else:
-            grad_logit = -prob_action_1
-
-        # Backprop
-        grad_w2 = h * grad_logit * G * learning_rate
-        grad_b2 = grad_logit * G * learning_rate
-
-        dh = updated_agent.w2 * grad_logit * G * learning_rate
-        dh_tanh = dh * (1 - h ** 2)
-
-        grad_w1 = np.outer(obs, dh_tanh) * learning_rate
-        grad_b1 = dh_tanh * learning_rate
-
-        # Update weights
-        updated_agent.w1 += grad_w1
-        updated_agent.b1 += grad_b1
-        updated_agent.w2 += grad_w2
-        updated_agent.b2 += grad_b2
-
-    return sum(rewards), updated_agent
+            delta_h = agent.w2 * delta_output * (1 - h ** 2)
+            agent.w1 += np.outer(state, delta_h) * learning_rate
+            agent.b1 += delta_h * learning_rate
 
 
-def hybrid_evolutionary_rl(env, population_size, generations, max_steps, rl_episodes=3, learning_rate=0.001):
-    """
-    Hybrid approach: Each generation, agents learn via RL before being evaluated for selection
-    """
+def evolutionary_strategies_with_rl(env, population_size, generations, max_steps,
+                                    rl_episodes=3, visualize=False, render_every=5):
     n_inputs = env.observation_space.shape[0]
     population = [SimpleNNPolicy(n_inputs) for _ in range(population_size)]
     avg_per_gen = []
 
-    for gen in range(generations):
-        # RL LEARNING PHASE: Each agent learns via REINFORCE
-        print(f"\nGeneration {gen} - RL Learning Phase...")
-        for i, agent in enumerate(population):
-            for ep in range(rl_episodes):
-                _, updated_agent = reinforce_episode(env, agent, max_steps, learning_rate)
-                population[i] = updated_agent
+    render_env = None
+    if visualize:
+        render_env = gym.make("CartPole-v1", render_mode="human")
 
-        # EVALUATION PHASE
+    for gen in range(generations):
+        # RL Phase: Train each agent in the population
+        print(f"Generation {gen}: Training population with RL...")
+        for agent in population:
+            train_agent_with_rl(env, agent, episodes=rl_episodes)
+
+        # Evaluation Phase
         rewards = [evaluate_agent(env, ind, max_steps=max_steps) for ind in population]
 
-        # SELECTION & REPRODUCTION PHASE
+        best_idx = np.argmax(rewards)
+        best_agent = population[best_idx]
+
+        # Evolution Phase: Selection and reproduction
         elite_idx = np.argsort(rewards)[-population_size // 5:]
         elites = [population[i] for i in elite_idx]
-
         new_population = elites.copy()
         while len(new_population) < population_size:
             parent = np.random.choice(elites)
@@ -153,19 +127,20 @@ def hybrid_evolutionary_rl(env, population_size, generations, max_steps, rl_epis
         avg_per_gen.append(np.mean(rewards))
         population = new_population
 
-        print(
-            f"Generation {gen}, Best: {max(rewards):.2f}, Avg: {np.mean(rewards):.2f}, Median: {np.median(rewards):.2f}")
+        print(f"  Best: {max(rewards):.2f}, Avg: {np.mean(rewards):.2f}, Median: {np.median(rewards):.2f}")
 
+        if visualize and render_env is not None:
+            if gen % render_every == 0 or gen == generations - 1:
+                print(f"  --> Visualizing best agent from generation {gen}...")
+                evaluate_agent(render_env, best_agent, max_steps=max_steps, render=True)
+                time.sleep(0.5)
+
+    if visualize and render_env is not None:
+        render_env.close()
     return avg_per_gen
 
 
-# Run the hybrid approach
 env = gym.make("CartPole-v1")
-results = hybrid_evolutionary_rl(
-    env,
-    population_size=20,
-    generations=40,
-    max_steps=500,
-    rl_episodes=10,
-    learning_rate=0.001
-)
+print(evolutionary_strategies_with_rl(env, population_size=20, generations=40,
+                                      max_steps=500, rl_episodes=3, visualize=False, render_every=5))
+env.close()
