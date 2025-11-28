@@ -6,6 +6,7 @@ from population_of_agents import evolutionary_strategies
 from population_of_actions import evolutionary_actions
 from reinforcement_learning import q_learning_main
 from population_of_policies import evolutionary_policies
+from population_of_agents_hybrid import evolutionary_strategies_with_rl
 
 runs = 10
 generations = 40
@@ -28,6 +29,16 @@ agents_all = repeat_and_collect(
     population_size=20,
     generations=generations,
     max_steps=steps,
+)
+
+hybrid_all = repeat_and_collect(
+    evolutionary_strategies_with_rl,
+    env=env,
+    population_size=20,
+    generations=generations,
+    max_steps=steps,
+    render_every=5,
+    rl_episodes=3,
 )
 
 actions_all = repeat_and_collect(
@@ -64,12 +75,13 @@ agents_mean, agents_std = compute_mean_std(agents_all)
 actions_mean, actions_std = compute_mean_std(actions_all)
 qlearning_mean, qlearning_std = compute_mean_std(qlearning_all)
 policies_mean, policies_std = compute_mean_std(policies_all)
+hybrid_mean, hybrid_std = compute_mean_std(hybrid_all)
 
 x = np.arange(1, generations + 1)
 
 # Побудова графіку з std dev
 plt.figure(figsize=(12, 7))
-plt.plot(x, agents_mean, label="Population of Agents")co
+plt.plot(x, agents_mean, label="Population of Agents")
 plt.fill_between(x, agents_mean - agents_std, agents_mean + agents_std, alpha=0.2)
 
 plt.plot(x, actions_mean, label="Population of Actions")
@@ -80,6 +92,9 @@ plt.fill_between(x, qlearning_mean - qlearning_std, qlearning_mean + qlearning_s
 
 plt.plot(x, policies_mean, label="Population of Policies", linestyle="--", linewidth=2)
 plt.fill_between(x, policies_mean - policies_std, policies_mean + policies_std, alpha=0.2)
+
+plt.plot(x, hybrid_mean, label="Hybrid (Agents + RL)", linestyle="-.", linewidth=2, color='purple')
+plt.fill_between(x, hybrid_mean - hybrid_std, hybrid_mean + hybrid_std, alpha=0.2)
 
 plt.xlabel("Generation")
 plt.ylabel("Average reward")
@@ -106,6 +121,7 @@ agents_growth = compute_percent_growth(agents_mean)
 actions_growth = compute_percent_growth(actions_mean)
 qlearning_growth = compute_percent_growth(qlearning_mean)
 policies_growth = compute_percent_growth(policies_mean)
+hybrid_growth = compute_percent_growth(hybrid_mean)
 
 # Виведення результатів
 print("Percentage growth every 5 generations:")
@@ -113,3 +129,4 @@ print("Population of Agents:", agents_growth)
 print("Population of Actions:", actions_growth)
 print("Q-learning:", qlearning_growth)
 print("Population of Policies:", policies_growth)
+print("Hybrid (Agents + RL):", hybrid_growth)
