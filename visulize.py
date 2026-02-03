@@ -7,6 +7,8 @@ from population_of_actions import evolutionary_actions
 from reinforcement_learning import q_learning_main
 from population_of_policies import evolutionary_policies
 from population_of_agents_hybrid import evolutionary_strategies_with_rl
+from sarsa import sarsa_algorithm
+from DQN import dqn_algorithm
 
 runs = 10
 generations = 40
@@ -65,6 +67,36 @@ policies_all = repeat_and_collect(
     generations=generations,
 )
 
+sarsa_all = repeat_and_collect(
+    sarsa_algorithm,
+    env=env,
+    n_bins=10,
+    alpha=0.1,
+    gamma=0.99,
+    epsilon=0.9,
+    generations=generations,
+    episodes_per_gen=10,
+    max_steps=steps,
+    visualize=False,
+    render_every=5,
+)
+
+dqn_all = repeat_and_collect(
+    dqn_algorithm,
+    env=env,
+    alpha=0.0005,
+    gamma=0.99,
+    epsilon=1.0,
+    buffer_size=50000,
+    batch_size=32,
+    target_update=100,
+    generations=generations,
+    episodes_per_gen=5,
+    max_steps=steps,
+    visualize=False,
+    render_every=10,
+)
+
 # Обчислення середнього та std dev
 def compute_mean_std(data):
     mean = data.mean(axis=0)
@@ -76,11 +108,13 @@ actions_mean, actions_std = compute_mean_std(actions_all)
 qlearning_mean, qlearning_std = compute_mean_std(qlearning_all)
 policies_mean, policies_std = compute_mean_std(policies_all)
 hybrid_mean, hybrid_std = compute_mean_std(hybrid_all)
+sarsa_mean, sarsa_std = compute_mean_std(sarsa_all)
+dqn_mean, dqn_std = compute_mean_std(dqn_all)
 
 x = np.arange(1, generations + 1)
 
 # Побудова графіку з std dev
-plt.figure(figsize=(12, 7))
+plt.figure(figsize=(14, 8))
 plt.plot(x, agents_mean, label="Population of Agents")
 plt.fill_between(x, agents_mean - agents_std, agents_mean + agents_std, alpha=0.2)
 
@@ -95,6 +129,12 @@ plt.fill_between(x, policies_mean - policies_std, policies_mean + policies_std, 
 
 plt.plot(x, hybrid_mean, label="Hybrid (Agents + RL)", linestyle="-.", linewidth=2, color='purple')
 plt.fill_between(x, hybrid_mean - hybrid_std, hybrid_mean + hybrid_std, alpha=0.2)
+
+plt.plot(x, sarsa_mean, label="SARSA", linestyle=":", linewidth=2, color='orange')
+plt.fill_between(x, sarsa_mean - sarsa_std, sarsa_mean + sarsa_std, alpha=0.2)
+
+plt.plot(x, dqn_mean, label="DQN", linestyle="-", linewidth=2, color='red')
+plt.fill_between(x, dqn_mean - dqn_std, dqn_mean + dqn_std, alpha=0.2)
 
 plt.xlabel("Generation")
 plt.ylabel("Average reward")
@@ -122,6 +162,8 @@ actions_growth = compute_percent_growth(actions_mean)
 qlearning_growth = compute_percent_growth(qlearning_mean)
 policies_growth = compute_percent_growth(policies_mean)
 hybrid_growth = compute_percent_growth(hybrid_mean)
+sarsa_growth = compute_percent_growth(sarsa_mean)
+dqn_growth = compute_percent_growth(dqn_mean)
 
 # Виведення результатів
 print("Percentage growth every 5 generations:")
@@ -130,3 +172,5 @@ print("Population of Actions:", actions_growth)
 print("Q-learning:", qlearning_growth)
 print("Population of Policies:", policies_growth)
 print("Hybrid (Agents + RL):", hybrid_growth)
+print("SARSA:", sarsa_growth)
+print("DQN:", dqn_growth)
