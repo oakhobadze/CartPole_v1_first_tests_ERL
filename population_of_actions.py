@@ -118,6 +118,7 @@ def evolutionary_actions(env, population_size, generations, max_seq_length, visu
     return avg_per_gen
 
 
-env = gym.make("CartPole-v1")
+env = gym.make("LunarLander-v3")
+#env = gym.make("CartPole-v1")
 evolutionary_actions(env, population_size=20, generations=20, max_seq_length=500, visualize=False, render_every=5)
 env.close()

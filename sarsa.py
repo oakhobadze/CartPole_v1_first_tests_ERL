@@ -5,11 +5,14 @@ import time
 
 
 class SARSAAgent:
-    def __init__(self, actions, alpha=0.1, gamma=0.99, epsilon=0.9):
+    def __init__(self, actions, obs_dim, obs_low, obs_high, alpha=0.1, gamma=0.99, epsilon=0.9):
         self.actions = actions
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
+        self.obs_dim = obs_dim
+        self.obs_low = obs_low
+        self.obs_high = obs_high
         self.q_table = pd.DataFrame(columns=actions, dtype=np.float64)
 
     def check_state(self, state):
@@ -18,11 +21,10 @@ class SARSAAgent:
                                                                  index=[state], columns=self.actions)])
 
     def discretize(self, obs, n_bins=10):
-        bounds = np.array([[-2.4, 2.4], [-3.0, 3.0], [-0.21, 0.21], [-2.0, 2.0]])
         state = []
         for i, val in enumerate(obs):
-            clipped = np.clip(val, bounds[i][0], bounds[i][1])
-            bin_idx = min(int(np.digitize(clipped, np.linspace(bounds[i][0], bounds[i][1], n_bins - 1))), n_bins - 1)
+            clipped = np.clip(val, self.obs_low[i], self.obs_high[i])
+            bin_idx = min(int(np.digitize(clipped, np.linspace(self.obs_low[i], self.obs_high[i], n_bins - 1))), n_bins - 1)
             state.append(bin_idx)
         return str(tuple(state))
 
@@ -65,13 +67,33 @@ def evaluate_agent(env, agent, max_steps, n_bins=10, render=False):
 def sarsa_algorithm(env, n_bins=10, alpha=0.1, gamma=0.99, epsilon=0.9,
                     generations=40, episodes_per_gen=10, max_steps=500,
                     visualize=False, render_every=5):
-    agent = SARSAAgent(list(range(env.action_space.n)), alpha, gamma, epsilon)
+
+    obs_dim = env.observation_space.shape[0]
+    obs_low = np.where(
+        np.isinf(env.observation_space.low),
+        -10,
+        env.observation_space.low
+    )
+    obs_high = np.where(
+        np.isinf(env.observation_space.high),
+        10,
+        env.observation_space.high
+    )
+
+    agent = SARSAAgent(
+        actions=list(range(env.action_space.n)),
+        obs_dim=obs_dim,
+        obs_low=obs_low,
+        obs_high=obs_high,
+        alpha=alpha,
+        gamma=gamma,
+        epsilon=epsilon
+    )
     avg_per_gen = []
 
-    # Create rendering environment only if visualization is enabled
     render_env = None
     if visualize:
-        render_env = gym.make("CartPole-v1", render_mode="human")
+        render_env = gym.make(env.spec.id, render_mode="human")
 
     for gen in range(generations):
         gen_rewards = []
@@ -112,7 +134,8 @@ def sarsa_algorithm(env, n_bins=10, alpha=0.1, gamma=0.99, epsilon=0.9,
     return avg_per_gen
 
 
-env = gym.make("CartPole-v1")
+env = gym.make("LunarLander-v3")
+# env = gym.make("CartPole-v1")
 print(sarsa_algorithm(env, n_bins=10, alpha=0.1, gamma=0.99, epsilon=0.9,
                       generations=40, episodes_per_gen=10, max_steps=500,
                       visualize=True, render_every=5))

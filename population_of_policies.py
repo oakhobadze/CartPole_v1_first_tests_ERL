@@ -52,12 +52,25 @@ def evaluate_policy(env, policy, bins, low, high, max_steps=500, render=False):
 
 
 def evolutionary_policies(env, population_size=20, generations=20, visualize=False, render_every=5):
-    bins = (6, 12, 6, 12)
-    low = np.array([-4.8, -4, -0.418, -4])
-    high = np.array([4.8, 4, 0.418, 4])
+    obs_dim = env.observation_space.shape[0]
+    n_actions = env.action_space.n
 
-    state_shape = tuple(b for b in bins)
-    population = [TabularPolicy(state_shape) for _ in range(population_size)]
+    bins_per_dim = 6 if obs_dim > 4 else 12
+    bins = tuple([bins_per_dim] * obs_dim)
+
+    low = np.where(
+        np.isinf(env.observation_space.low),
+        -10,
+        env.observation_space.low
+    )
+    high = np.where(
+        np.isinf(env.observation_space.high),
+        10,
+        env.observation_space.high
+    )
+
+    state_shape = bins
+    population = [TabularPolicy(state_shape, n_actions) for _ in range(population_size)]
     avg_per_gen = []
 
     # Create rendering environment only if visualization is enabled
@@ -102,6 +115,7 @@ def evolutionary_policies(env, population_size=20, generations=20, visualize=Fal
 
     return avg_per_gen
 
-env = gym.make("CartPole-v1")
+env = gym.make("LunarLander-v3")
+#env = gym.make("CartPole-v1")
 evolutionary_policies(env, population_size=20, generations=20, visualize=False, render_every=5)
 env.close()
