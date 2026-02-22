@@ -4,22 +4,28 @@ import time
 
 
 class SimpleNNPolicy:
-    def __init__(self, input_size, hidden_size=8):
+    def __init__(self, input_size, output_size, hidden_size=8):
         self.w1 = np.random.randn(input_size, hidden_size)
         self.b1 = np.random.randn(hidden_size)
-        self.w2 = np.random.randn(hidden_size)
-        self.b2 = np.random.randn(1)
+        self.w2 = np.random.randn(hidden_size, output_size)
+        self.b2 = np.random.randn(output_size)
 
     def act(self, obs):
         h = np.tanh(np.dot(obs, self.w1) + self.b1)
         output = np.dot(h, self.w2) + self.b2
-        return int(output > 0)
+
+        # For single output (discrete actions), threshold it
+        if len(output) == 1:
+            return int(output[0] > 0)
+        # For multiple outputs (continuous actions), use tanh
+        else:
+            return np.tanh(output)
 
     def mutate(self, mutation_scale=0.1):
-        new_policy = SimpleNNPolicy(self.w1.shape[0], self.w1.shape[1])
+        new_policy = SimpleNNPolicy(self.w1.shape[0], self.w2.shape[1], self.w1.shape[1])
 
         def mutate_param(param):
-            return param * np.random.uniform(1 - mutation_scale, 1 + mutation_scale, size=param.shape)
+            return param + np.random.randn(*param.shape) * mutation_scale
 
         new_policy.w1 = mutate_param(self.w1)
         new_policy.b1 = mutate_param(self.b1)
@@ -46,13 +52,22 @@ def evaluate_agent(env, agent, max_steps, render=False):
 
 def evolutionary_strategies(env, population_size, generations, max_steps, visualize=False, render_every=5):
     n_inputs = env.observation_space.shape[0]
-    population = [SimpleNNPolicy(n_inputs) for _ in range(population_size)]
+
+    # Handle both discrete and continuous action spaces
+    if hasattr(env.action_space, 'n'):  # Discrete action space (CartPole)
+        n_outputs = 1
+    else:  # Continuous action space (BipedalWalker)
+        n_outputs = env.action_space.shape[0]
+
+    population = [SimpleNNPolicy(n_inputs, n_outputs) for _ in range(population_size)]
     avg_per_gen = []
 
     # Create rendering environment only if visualization is enabled
     render_env = None
     if visualize:
-        render_env = gym.make("CartPole-v1", render_mode="human")
+        # Get the environment name dynamically
+        env_name = env.unwrapped.spec.id if hasattr(env.unwrapped, 'spec') else "CartPole-v1"
+        render_env = gym.make(env_name, render_mode="human")
 
     for gen in range(generations):
         rewards = [evaluate_agent(env, ind, max_steps=max_steps) for ind in population]
@@ -84,9 +99,8 @@ def evolutionary_strategies(env, population_size, generations, max_steps, visual
         render_env.close()
     return avg_per_gen
 
-
-
-env = gym.make("CartPole-v1")
+env = gym.make("LunarLander-v3")
+#env = gym.make("CartPole-v1")
 print(evolutionary_strategies(env, population_size=20, generations=40, max_steps=500, visualize=False, render_every=5))
 
 env.close()

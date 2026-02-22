@@ -140,7 +140,8 @@ def evolutionary_strategies_with_rl(env, population_size, generations, max_steps
     return avg_per_gen
 
 
-env = gym.make("CartPole-v1")
+env = gym.make("LunarLander-v3")
+#env = gym.make("CartPole-v1")
 print(evolutionary_strategies_with_rl(env, population_size=20, generations=40,
                                       max_steps=500, rl_episodes=3, visualize=False, render_every=5))
 env.close()

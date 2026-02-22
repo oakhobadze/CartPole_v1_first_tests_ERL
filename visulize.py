@@ -12,7 +12,7 @@ from DQN import dqn_algorithm
 
 runs = 10
 generations = 40
-env = gym.make("CartPole-v1")
+env = gym.make("LunarLander-v3")
 steps = 500
 alpha = 0.2
 gamma = 0.99

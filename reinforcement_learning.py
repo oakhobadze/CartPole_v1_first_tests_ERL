@@ -2,7 +2,8 @@ import gymnasium as gym
 import numpy as np
 
 def q_learning_main(episodes_per_generation=150, generations=20, alpha=0.2, gamma=0.99, epsilon_start=0.999):
-    env = gym.make("CartPole-v1")
+    #env = gym.make("CartPole-v1")
+    env = gym.make("LunarLander-v3")
     n_bins = [20, 30, 20, 30]
     bins = [np.linspace(-4.8, 4.8, n_bins[0]-1),
             np.linspace(-0.5, 0.5, n_bins[1]-1),

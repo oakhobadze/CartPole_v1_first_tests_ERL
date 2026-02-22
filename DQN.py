@@ -190,8 +190,8 @@ def dqn_algorithm(env, alpha=0.0005, gamma=0.99, epsilon=1.0, buffer_size=50000,
 
     return avg_per_gen
 
-
-env = gym.make("CartPole-v1")
+env = gym.make("LunarLander-v3")
+#env = gym.make("CartPole-v1")
 print(dqn_algorithm(env, alpha=0.0005, gamma=0.99, epsilon=1.0, buffer_size=50000,
                     batch_size=32, target_update=100, generations=40, episodes_per_gen=5,
                     max_steps=500, visualize=False, render_every=10))
