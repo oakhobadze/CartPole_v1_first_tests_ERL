@@ -64,6 +64,9 @@ coverage.xml
 .vscode/
 .idea/
 
+results/
+results_of_fine_tune.txt
+
 # Sublime Text
 *.sublime-workspace
 *.sublime-project

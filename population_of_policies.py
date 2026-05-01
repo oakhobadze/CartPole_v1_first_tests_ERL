@@ -4,6 +4,7 @@ import time
 
 
 def discretize_obs(obs, bins, low, high):
+    obs = np.atleast_1d(obs)
     obs = np.clip(obs, low, high)
     grid = [np.linspace(l, h, n - 1) for l, h, n in zip(low, high, bins)]
     return tuple(int(np.digitize(o, g)) for o, g in zip(obs, grid))
@@ -47,75 +48,89 @@ def evaluate_policy(env, policy, bins, low, high, max_steps=500, render=False):
         steps += 1
         if render:
             env.render()
-            time.sleep(0.02)  # Slow down for visibility
+            time.sleep(0.02)
     return total_reward
 
 
-def evolutionary_policies(env, population_size=20, generations=20, visualize=False, render_every=5):
-    obs_dim = env.observation_space.shape[0]
-    n_actions = env.action_space.n
+def evolutionary_policies(env, population_size=100, generations=200, mutation_rate=0.05,
+                           visualize=False, render_every=5):
+    # Handle both vector and integer observation spaces
+    if hasattr(env.observation_space, 'shape') and len(env.observation_space.shape) > 0:
+        obs_dim = env.observation_space.shape[0]
+        low = np.where(np.isinf(env.observation_space.low), -10, env.observation_space.low)
+        high = np.where(np.isinf(env.observation_space.high), 10, env.observation_space.high)
+    else:
+        obs_dim = 1
+        low = np.array([0])
+        high = np.array([env.observation_space.n - 1])
 
+    n_actions = env.action_space.n
     bins_per_dim = 6 if obs_dim > 4 else 12
     bins = tuple([bins_per_dim] * obs_dim)
-
-    low = np.where(
-        np.isinf(env.observation_space.low),
-        -10,
-        env.observation_space.low
-    )
-    high = np.where(
-        np.isinf(env.observation_space.high),
-        10,
-        env.observation_space.high
-    )
 
     state_shape = bins
     population = [TabularPolicy(state_shape, n_actions) for _ in range(population_size)]
     avg_per_gen = []
+    best_ever_policy = None
+    best_ever_reward = -np.inf
 
-    # Create rendering environment only if visualization is enabled
     render_env = None
     if visualize:
-        render_env = gym.make("CartPole-v1", render_mode="human")
+        env_name = env.unwrapped.spec.id if hasattr(env.unwrapped, 'spec') else env.spec.id
+        render_env = gym.make(env_name, render_mode="human")
 
     for gen in range(generations):
         rewards = [evaluate_policy(env, ind, bins, low, high) for ind in population]
 
-        # Find best policy
         best_idx = np.argmax(rewards)
         best_policy = population[best_idx]
+
+        if rewards[best_idx] > best_ever_reward:
+            best_ever_reward = rewards[best_idx]
+            best_ever_policy = best_policy
+            print(f"  *** New best ever: {best_ever_reward:.2f} ***")
 
         elite_idx = np.argsort(rewards)[-population_size // 5:]
         elites = [population[i] for i in elite_idx]
 
         new_population = elites.copy()
+        new_population.append(best_ever_policy)
+
+        current_mutation_rate = mutation_rate * (0.995 ** gen)
+        current_mutation_rate = max(current_mutation_rate, 0.001)
+
         while len(new_population) < population_size:
             if np.random.rand() < 0.5:
                 p1, p2 = np.random.choice(elites, 2, replace=False)
                 child = TabularPolicy.crossover(p1, p2)
             else:
                 parent = np.random.choice(elites)
-                child = parent.mutate()
+                child = parent.mutate(current_mutation_rate)
             new_population.append(child)
 
         population = new_population
         avg_reward = np.mean(rewards)
         avg_per_gen.append(avg_reward)
-        print(f"Gen {gen}, Best: {max(rewards):.2f}, Avg: {avg_reward:.2f}, Median: {np.median(rewards):.2f}")
+        print(f"Gen {gen}, Best: {max(rewards):.2f}, Avg: {avg_reward:.2f}, "
+              f"Median: {np.median(rewards):.2f}, Mutation: {current_mutation_rate:.4f}, "
+              f"Best Ever: {best_ever_reward:.2f}")
 
-        # Render best policy every N generations (only if visualization is enabled)
         if visualize and render_env is not None:
             if gen % render_every == 0 or gen == generations - 1:
                 print(f"  --> Visualizing best policy from generation {gen}...")
-                evaluate_policy(render_env, best_policy, bins, low, high, render=True)
-                time.sleep(0.5)  # Pause between generations
+                evaluate_policy(render_env, best_ever_policy, bins, low, high, render=True)
+                time.sleep(0.5)
 
     if visualize and render_env is not None:
         render_env.close()
 
     return avg_per_gen
 
-env = gym.make("LunarLander-v3")
-#env = gym.make("CartPole-v1")
-evolutionary_policies(env, population_size=20, generations=20, visualize=False, render_every=5)
-env.close()
+
+if __name__ == "__main__":
+    #env = gym.make("Acrobot-v1")
+    # env = gym.make("LunarLander-v3")
+    env = gym.make("CartPole-v1")
+    evolutionary_policies(env, population_size=200, generations=200, mutation_rate=0.02,
+                          visualize=False, render_every=5)
+    env.close()
