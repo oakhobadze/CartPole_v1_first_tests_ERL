@@ -27,24 +27,20 @@ class SimpleNN:
     def backward(self, x, target, output):
         batch_size = len(x)
 
-        # Output layer
         dout = (output - target) / batch_size
         dw3 = self.h2.T @ dout
         db3 = np.sum(dout, axis=0)
 
-        # Hidden layer 2
         dh2 = dout @ self.w3.T
         dz2 = dh2 * (self.z2 > 0)
         dw2 = self.h1.T @ dz2
         db2 = np.sum(dz2, axis=0)
 
-        # Hidden layer 1
         dh1 = dz2 @ self.w2.T
         dz1 = dh1 * (self.z1 > 0)
         dw1 = x.T @ dz1
         db1 = np.sum(dz1, axis=0)
 
-        # Update weights
         self.w3 -= self.lr * dw3
         self.b3 -= self.lr * db3
         self.w2 -= self.lr * dw2
@@ -63,12 +59,11 @@ class SimpleNN:
 
 class DQNAgent:
     def __init__(self, state_dim, action_dim, alpha=0.0005, gamma=0.99, epsilon=1.0,
-                 buffer_size=50000, batch_size=32):
+                 buffer_size=100000, batch_size=64):
         self.action_dim = action_dim
         self.gamma = gamma
         self.epsilon = epsilon
         self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
         self.batch_size = batch_size
         self.q_net = SimpleNN(state_dim, action_dim, alpha)
         self.target_net = SimpleNN(state_dim, action_dim, alpha)
@@ -76,9 +71,9 @@ class DQNAgent:
         self.buffer = deque(maxlen=buffer_size)
 
     def get_action(self, state):
-        if np.random.rand() > self.epsilon:  # Explore with probability (1-epsilon)
+        if np.random.rand() < self.epsilon:
             return np.random.randint(self.action_dim)
-        return np.argmax(self.q_net.forward(state.reshape(1, -1)))
+        return int(np.argmax(self.q_net.forward(state.reshape(1, -1))))
 
     def store(self, s, a, r, s_next, done):
         self.buffer.append((s, a, r, s_next, done))
@@ -94,15 +89,11 @@ class DQNAgent:
         s_next = np.array([b[3] for b in batch])
         done = np.array([b[4] for b in batch])
 
-        # Current Q values
         q_current = self.q_net.forward(s)
-
-        # Target Q values
         q_next = np.max(self.target_net.forward(s_next), axis=1)
         q_target = q_current.copy()
         q_target[np.arange(self.batch_size), a] = r + (1 - done) * self.gamma * q_next
 
-        # Train
         self.q_net.backward(s, q_target, q_current)
 
         return np.mean((q_current[np.arange(self.batch_size), a] -
@@ -114,10 +105,12 @@ class DQNAgent:
 
 def evaluate_agent(env, agent, max_steps, render=False):
     obs, _ = env.reset()
+    obs = np.atleast_1d(obs).astype(np.float32)
     total_reward = 0
     for _ in range(max_steps):
-        action = np.argmax(agent.q_net.forward(obs.reshape(1, -1)))
+        action = int(np.argmax(agent.q_net.forward(obs.reshape(1, -1))))
         obs, reward, terminated, truncated, _ = env.step(action)
+        obs = np.atleast_1d(obs).astype(np.float32)
         total_reward += reward
         if render:
             env.render()
@@ -127,72 +120,105 @@ def evaluate_agent(env, agent, max_steps, render=False):
     return total_reward
 
 
-def dqn_algorithm(env, alpha=0.0005, gamma=0.99, epsilon=1.0, buffer_size=50000,
-                  batch_size=32, target_update=100, generations=100, episodes_per_gen=5,
-                  max_steps=500, visualize=False, render_every=10):
-    state_dim = env.observation_space.shape[0]
+def dqn_algorithm(env, alpha=0.0005, gamma=0.99, epsilon=1.0, buffer_size=100000,
+                  batch_size=64, target_update_steps=500, generations=100,
+                  episodes_per_gen=10, max_steps=1000, visualize=False, render_every=10):
+
+    # Handle both vector and integer observation spaces
+    if hasattr(env.observation_space, 'shape') and len(env.observation_space.shape) > 0:
+        state_dim = env.observation_space.shape[0]
+    else:
+        state_dim = 1
+
     action_dim = env.action_space.n
+
     agent = DQNAgent(state_dim, action_dim, alpha, gamma, epsilon, buffer_size, batch_size)
     avg_per_gen = []
+    best_ever_reward = -np.inf
+    total_steps = 0
 
     render_env = None
     if visualize:
-        try:
-            render_env = gym.make("CartPole-v1", render_mode="human")
-        except:
-            visualize = False
+        env_name = env.unwrapped.spec.id if hasattr(env.unwrapped, 'spec') else env.spec.id
+        render_env = gym.make(env_name, render_mode="human")
 
-    total_steps = 0
+    print("Filling replay buffer...")
+    warmup_obs, _ = env.reset()
+    warmup_obs = np.atleast_1d(warmup_obs).astype(np.float32)
+    for _ in range(min(5000, buffer_size // 10)):
+        action = env.action_space.sample()
+        next_obs, reward, terminated, truncated, _ = env.step(action)
+        next_obs = np.atleast_1d(next_obs).astype(np.float32)
+        agent.store(warmup_obs, action, reward, next_obs, float(terminated or truncated))
+        warmup_obs = next_obs
+        if terminated or truncated:
+            warmup_obs, _ = env.reset()
+            warmup_obs = np.atleast_1d(warmup_obs).astype(np.float32)
+    print(f"Buffer prefilled with {len(agent.buffer)} experiences.")
 
     for gen in range(generations):
         gen_rewards = []
 
         for _ in range(episodes_per_gen):
             obs, _ = env.reset()
+            obs = np.atleast_1d(obs).astype(np.float32)
             ep_reward = 0
 
             for _ in range(max_steps):
                 action = agent.get_action(obs)
                 next_obs, reward, terminated, truncated, _ = env.step(action)
+                next_obs = np.atleast_1d(next_obs).astype(np.float32)
                 done = terminated or truncated
 
                 agent.store(obs, action, reward, next_obs, float(done))
-
-                if len(agent.buffer) >= batch_size:
-                    agent.train()
+                agent.train()
 
                 obs = next_obs
                 ep_reward += reward
                 total_steps += 1
+
+                if total_steps % target_update_steps == 0:
+                    agent.update_target()
 
                 if done:
                     break
 
             gen_rewards.append(ep_reward)
 
-        # Update target network every few generations
-        if gen % 5 == 0:
-            agent.update_target()
+        agent.epsilon = max(agent.epsilon_min, agent.epsilon * 0.97)
 
-        agent.epsilon = max(agent.epsilon_min, agent.epsilon * agent.epsilon_decay)
-        avg_per_gen.append(np.mean(gen_rewards))
+        avg_reward = np.mean(gen_rewards)
+        best_gen_reward = max(gen_rewards)
+        avg_per_gen.append(avg_reward)
 
-        print(f"Generation {gen}, Best: {max(gen_rewards):.2f}, Avg: {np.mean(gen_rewards):.2f}, "
-              f"Median: {np.median(gen_rewards):.2f}, Epsilon: {agent.epsilon:.4f}, Buffer: {len(agent.buffer)}")
+        if best_gen_reward > best_ever_reward:
+            best_ever_reward = best_gen_reward
+            print(f"  *** New best ever: {best_ever_reward:.2f} ***")
 
-        if visualize and render_env and (gen % render_every == 0 or gen == generations - 1):
-            print(f"  --> Visualizing best agent from generation {gen}...")
-            evaluate_agent(render_env, agent, max_steps, render=True)
-            time.sleep(0.5)
+        print(f"Generation {gen}, Best: {best_gen_reward:.2f}, Avg: {avg_reward:.2f}, "
+              f"Median: {np.median(gen_rewards):.2f}, Epsilon: {agent.epsilon:.4f}, "
+              f"Buffer: {len(agent.buffer)}, Steps: {total_steps}, "
+              f"Best Ever: {best_ever_reward:.2f}")
 
-    if render_env:
+        if visualize and render_env is not None:
+            if gen % render_every == 0 or gen == generations - 1:
+                print(f"  --> Visualizing best agent from generation {gen}...")
+                evaluate_agent(render_env, agent, max_steps, render=True)
+                time.sleep(0.5)
+
+    if visualize and render_env is not None:
         render_env.close()
 
     return avg_per_gen
 
-env = gym.make("LunarLander-v3")
-#env = gym.make("CartPole-v1")
-print(dqn_algorithm(env, alpha=0.0005, gamma=0.99, epsilon=1.0, buffer_size=50000,
-                    batch_size=32, target_update=100, generations=40, episodes_per_gen=5,
-                    max_steps=500, visualize=False, render_every=10))
-env.close()
+
+if __name__ == "__main__":
+    #env = gym.make("Taxi-v3")
+    env = gym.make("LunarLander-v3")
+    # env = gym.make("CartPole-v1")
+    #env = gym.make("Acrobot-v1")
+    # env = gym.make("MountainCar-v0")
+    print(dqn_algorithm(env, alpha=0.0003, gamma=0.99, epsilon=1.0, buffer_size=200000,
+                        batch_size=128, target_update_steps=1000, generations=200,
+                        episodes_per_gen=20, max_steps=500, visualize=False, render_every=10))
+    env.close()

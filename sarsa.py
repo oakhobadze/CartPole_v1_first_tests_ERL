@@ -1,11 +1,10 @@
 import gymnasium as gym
 import numpy as np
-import pandas as pd
 import time
 
 
 class SARSAAgent:
-    def __init__(self, actions, obs_dim, obs_low, obs_high, alpha=0.1, gamma=0.99, epsilon=0.9):
+    def __init__(self, actions, obs_dim, obs_low, obs_high, alpha=0.1, gamma=0.99, epsilon=1.0):
         self.actions = actions
         self.alpha = alpha
         self.gamma = gamma
@@ -13,33 +12,38 @@ class SARSAAgent:
         self.obs_dim = obs_dim
         self.obs_low = obs_low
         self.obs_high = obs_high
-        self.q_table = pd.DataFrame(columns=actions, dtype=np.float64)
+        self.q_table = {}
 
-    def check_state(self, state):
-        if state not in self.q_table.index:
-            self.q_table = pd.concat([self.q_table, pd.DataFrame([[0.0] * len(self.actions)],
-                                                                 index=[state], columns=self.actions)])
+    def get_q(self, state, action):
+        return self.q_table.get((state, action), 0.0)
+
+    def get_all_q(self, state):
+        return np.array([self.get_q(state, a) for a in self.actions])
 
     def discretize(self, obs, n_bins=10):
+        obs = np.atleast_1d(obs)
         state = []
         for i, val in enumerate(obs):
             clipped = np.clip(val, self.obs_low[i], self.obs_high[i])
-            bin_idx = min(int(np.digitize(clipped, np.linspace(self.obs_low[i], self.obs_high[i], n_bins - 1))), n_bins - 1)
+            bin_idx = min(
+                int(np.digitize(clipped, np.linspace(self.obs_low[i], self.obs_high[i], n_bins - 1))),
+                n_bins - 1
+            )
             state.append(bin_idx)
-        return str(tuple(state))
+        return tuple(state)
 
     def get_action(self, state):
-        self.check_state(state)
-        if np.random.rand() < self.epsilon:
-            actions = self.q_table.loc[state, :].reindex(np.random.permutation(self.q_table.columns))
-            return actions.idxmax()
+        if np.random.rand() > self.epsilon:
+            return int(np.argmax(self.get_all_q(state)))
         return np.random.choice(self.actions)
 
     def update(self, s, a, r, s_next, a_next, done):
-        self.check_state(s_next)
-        q_pred = self.q_table.loc[s, a]
-        q_target = r if done else r + self.gamma * self.q_table.loc[s_next, a_next]
-        self.q_table.loc[s, a] += self.alpha * (q_target - q_pred)
+        q_pred = self.get_q(s, a)
+        if done:
+            q_target = r
+        else:
+            q_target = r + self.gamma * self.get_q(s_next, a_next)
+        self.q_table[(s, a)] = q_pred + self.alpha * (q_target - q_pred)
 
 
 def evaluate_agent(env, agent, max_steps, n_bins=10, render=False):
@@ -50,8 +54,7 @@ def evaluate_agent(env, agent, max_steps, n_bins=10, render=False):
     steps = 0
 
     while not (terminated or truncated) and steps < max_steps:
-        agent.check_state(state)
-        action = agent.q_table.loc[state, :].idxmax()
+        action = int(np.argmax(agent.get_all_q(state)))
         obs, reward, terminated, truncated, _ = env.step(action)
         next_state = agent.discretize(obs, n_bins)
         total_reward += reward
@@ -64,21 +67,20 @@ def evaluate_agent(env, agent, max_steps, n_bins=10, render=False):
     return total_reward
 
 
-def sarsa_algorithm(env, n_bins=10, alpha=0.1, gamma=0.99, epsilon=0.9,
-                    generations=40, episodes_per_gen=10, max_steps=500,
+def sarsa_algorithm(env, n_bins=10, alpha=0.1, gamma=0.99, epsilon=1.0,
+                    generations=50, episodes_per_gen=100, max_steps=1000,
                     visualize=False, render_every=5):
 
-    obs_dim = env.observation_space.shape[0]
-    obs_low = np.where(
-        np.isinf(env.observation_space.low),
-        -10,
-        env.observation_space.low
-    )
-    obs_high = np.where(
-        np.isinf(env.observation_space.high),
-        10,
-        env.observation_space.high
-    )
+    # Handle both vector and integer observation spaces
+    if hasattr(env.observation_space, 'shape') and len(env.observation_space.shape) > 0:
+        obs_dim = env.observation_space.shape[0]
+        obs_low = np.where(np.isinf(env.observation_space.low), -10, env.observation_space.low)
+        obs_high = np.where(np.isinf(env.observation_space.high), 10, env.observation_space.high)
+    else:
+        # Discrete observation space like Taxi, FrozenLake
+        obs_dim = 1
+        obs_low = np.array([0])
+        obs_high = np.array([env.observation_space.n - 1])
 
     agent = SARSAAgent(
         actions=list(range(env.action_space.n)),
@@ -90,10 +92,12 @@ def sarsa_algorithm(env, n_bins=10, alpha=0.1, gamma=0.99, epsilon=0.9,
         epsilon=epsilon
     )
     avg_per_gen = []
+    best_ever_reward = -np.inf
 
     render_env = None
     if visualize:
-        render_env = gym.make(env.spec.id, render_mode="human")
+        env_name = env.unwrapped.spec.id if hasattr(env.unwrapped, 'spec') else env.spec.id
+        render_env = gym.make(env_name, render_mode="human")
 
     for gen in range(generations):
         gen_rewards = []
@@ -116,11 +120,19 @@ def sarsa_algorithm(env, n_bins=10, alpha=0.1, gamma=0.99, epsilon=0.9,
 
             gen_rewards.append(ep_reward)
 
-        agent.epsilon = max(0.01, agent.epsilon * 0.995)
-        avg_per_gen.append(np.mean(gen_rewards))
+        agent.epsilon = max(0.01, agent.epsilon * 0.97)
 
-        print(f"Generation {gen}, Best: {max(gen_rewards):.2f}, Avg: {np.mean(gen_rewards):.2f}, "
-              f"Median: {np.median(gen_rewards):.2f}, Epsilon: {agent.epsilon:.4f}")
+        avg_reward = np.mean(gen_rewards)
+        best_gen_reward = max(gen_rewards)
+        avg_per_gen.append(avg_reward)
+
+        if best_gen_reward > best_ever_reward:
+            best_ever_reward = best_gen_reward
+            print(f"  *** New best ever: {best_ever_reward:.2f} ***")
+
+        print(f"Generation {gen}, Best: {best_gen_reward:.2f}, Avg: {avg_reward:.2f}, "
+              f"Median: {np.median(gen_rewards):.2f}, Epsilon: {agent.epsilon:.4f}, "
+              f"Best Ever: {best_ever_reward:.2f}, Q-table size: {len(agent.q_table)}")
 
         if visualize and render_env is not None:
             if gen % render_every == 0 or gen == generations - 1:
@@ -134,9 +146,13 @@ def sarsa_algorithm(env, n_bins=10, alpha=0.1, gamma=0.99, epsilon=0.9,
     return avg_per_gen
 
 
-env = gym.make("LunarLander-v3")
-# env = gym.make("CartPole-v1")
-print(sarsa_algorithm(env, n_bins=10, alpha=0.1, gamma=0.99, epsilon=0.9,
-                      generations=40, episodes_per_gen=10, max_steps=500,
-                      visualize=True, render_every=5))
-env.close()
+if __name__ == "__main__":
+    #env = gym.make("Pendulum-v1")
+    #env = gym.make("CartPole-v1")
+    # env = gym.make("LunarLander-v3")
+    env = gym.make("Acrobot-v1")
+    # env = gym.make("MountainCar-v0")
+    print(sarsa_algorithm(env, n_bins=15, alpha=0.2, gamma=0.99, epsilon=1.0,
+                          generations=100, episodes_per_gen=250, max_steps=1000,
+                          visualize=False, render_every=5))
+    env.close()
